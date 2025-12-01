@@ -2,7 +2,7 @@ import React, { useState, useEffect, createContext, useContext } from 'react';
 import { HashRouter, Routes, Route, Navigate, useLocation, Link } from 'react-router-dom';
 import { User, Role, AppSettings } from './types';
 import { AuthAPI, DataAPI } from './services/dataService';
-import { auth } from './firebaseConfig';
+import { auth, isFirebaseConfigured } from './firebaseConfig';
 import { onAuthStateChanged } from 'firebase/auth';
 import { MENU_ITEMS } from './constants';
 import Login from './views/Login';
@@ -11,6 +11,7 @@ import Sales from './views/Sales';
 import Services from './views/Services';
 import Team from './views/Team';
 import Settings from './views/Settings';
+import { Button } from './components/UIComponents';
 
 // --- Auth Context ---
 interface AuthContextType {
@@ -119,6 +120,64 @@ const ProtectedRoute = ({ children }: { children?: React.ReactNode }) => {
   );
 };
 
+// --- Setup Screen ---
+const SetupScreen = () => {
+    const [configJson, setConfigJson] = useState('');
+    const [error, setError] = useState('');
+
+    const handleSaveConfig = () => {
+        try {
+            const parsed = JSON.parse(configJson);
+            if (!parsed.apiKey || !parsed.projectId) {
+                setError("O JSON parece incompleto. Verifique se copiou tudo.");
+                return;
+            }
+            localStorage.setItem('firebase_config', JSON.stringify(parsed));
+            window.location.reload();
+        } catch (e) {
+            setError("JSON inválido. Certifique-se de copiar corretamente.");
+        }
+    };
+
+    return (
+        <div className="min-h-screen bg-slate-900 flex items-center justify-center p-4">
+            <div className="bg-slate-800 p-8 rounded-xl shadow-2xl max-w-lg w-full border-t-4 border-primary">
+                <div className="text-center mb-6">
+                    <div className="w-20 h-20 bg-slate-900 rounded-full mx-auto flex items-center justify-center border-2 border-slate-700 mb-4">
+                        <i className="fas fa-cloud-upload-alt text-4xl text-primary"></i>
+                    </div>
+                    <h1 className="text-2xl font-bold text-white">Conexão Firebase</h1>
+                    <p className="text-slate-400 mt-2 text-sm">
+                        Como este site é hospedado no GitHub Pages, precisamos que você conecte seu banco de dados manualmente.
+                    </p>
+                </div>
+
+                <div className="bg-slate-900 p-4 rounded border border-slate-700 mb-4">
+                    <ol className="list-decimal list-inside text-xs text-slate-400 space-y-1">
+                        <li>Acesse o <strong>Console do Firebase</strong>.</li>
+                        <li>Vá em Configurações do Projeto {'>'} Geral.</li>
+                        <li>Role até "Seus aplicativos" e selecione "Configuração (npm)".</li>
+                        <li>Copie o objeto <code>const firebaseConfig = {'{...}'}</code> (apenas o conteúdo entre chaves).</li>
+                    </ol>
+                </div>
+
+                <textarea
+                    className="w-full h-40 bg-slate-900 border border-slate-600 rounded p-3 text-xs font-mono text-green-400 mb-2 focus:border-primary focus:outline-none"
+                    placeholder='{ "apiKey": "...", "authDomain": "...", ... }'
+                    value={configJson}
+                    onChange={(e) => setConfigJson(e.target.value)}
+                />
+                
+                {error && <p className="text-red-400 text-xs mb-4"><i className="fas fa-exclamation-triangle"></i> {error}</p>}
+
+                <Button onClick={handleSaveConfig} className="w-full">
+                    Salvar e Conectar
+                </Button>
+            </div>
+        </div>
+    );
+};
+
 // --- Main App ---
 const App = () => {
   const [user, setUser] = useState<User | null>(null);
@@ -127,6 +186,11 @@ const App = () => {
 
   // Load Settings
   useEffect(() => {
+    if (!isFirebaseConfigured) {
+        setIsLoading(false);
+        return;
+    }
+
     const loadSettings = async () => {
         try {
             const s = await DataAPI.getSettings();
@@ -140,6 +204,8 @@ const App = () => {
 
   // Listen to Firebase Auth Changes
   useEffect(() => {
+    if (!isFirebaseConfigured) return;
+
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       if (currentUser) {
         // Auth exists, fetch profile data
@@ -153,6 +219,10 @@ const App = () => {
 
     return () => unsubscribe();
   }, []);
+
+  if (!isFirebaseConfigured) {
+      return <SetupScreen />;
+  }
 
   const login = async (email: string, password: string) => {
     setIsLoading(true);

@@ -1,8 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Button, Input } from '../components/UIComponents';
+import { Card, Button, Input, Table } from '../components/UIComponents';
 import { useAuth } from '../App';
 import { DataAPI } from '../services/dataService';
 import { Navigate } from 'react-router-dom';
+import { Coupon } from '../types';
 
 const Settings = () => {
   const { user, settings } = useAuth();
@@ -14,10 +15,21 @@ const Settings = () => {
   });
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState('');
+  
+  // Coupons State
+  const [coupons, setCoupons] = useState<Coupon[]>([]);
+  const [newCouponCode, setNewCouponCode] = useState('');
+  const [newCouponPercent, setNewCouponPercent] = useState(10);
 
   useEffect(() => {
       if(settings) setFormData(settings);
+      loadCoupons();
   }, [settings]);
+
+  const loadCoupons = async () => {
+      const data = await DataAPI.getCoupons();
+      setCoupons(data);
+  }
 
   if (user?.role !== 'dono') return <Navigate to="/" />;
 
@@ -36,12 +48,51 @@ const Settings = () => {
       }
   }
 
+  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+        setLoading(true);
+        try {
+            const url = await DataAPI.uploadLogo(e.target.files[0]);
+            setFormData(prev => ({ ...prev, logoUrl: url }));
+        } catch (error) {
+            console.error("Upload failed", error);
+            alert("Erro ao fazer upload da imagem.");
+        } finally {
+            setLoading(false);
+        }
+    }
+  }
+
+  const handleAddCoupon = async () => {
+      if(!newCouponCode || !user) return;
+      setLoading(true);
+      await DataAPI.addCoupon({
+          code: newCouponCode.toUpperCase(),
+          discountPercent: newCouponPercent,
+          active: true
+      }, user);
+      setNewCouponCode('');
+      setLoading(false);
+      loadCoupons();
+  }
+
+  const handleToggleCoupon = async (c: Coupon) => {
+      if(!user) return;
+      await DataAPI.toggleCoupon(c.id, !c.active, user);
+      loadCoupons();
+  }
+
+  const handleDeleteCoupon = async (id: string) => {
+      if(!user || !window.confirm("Excluir este cupom?")) return;
+      await DataAPI.deleteCoupon(id, user);
+      loadCoupons();
+  }
+
   const handleBackup = async () => {
-    // Backup Data from Firestore to JSON
     setLoading(true);
     const sales = await DataAPI.getSales(user!);
     const services = await DataAPI.getServices();
-    const backup = { date: new Date(), sales, services, settings: formData };
+    const backup = { date: new Date(), sales, services, settings: formData, coupons };
     
     const blob = new Blob([JSON.stringify(backup, null, 2)], { type: "application/json" });
     const url = URL.createObjectURL(blob);
@@ -71,18 +122,21 @@ const Settings = () => {
                     value={formData.loginTitle} 
                     onChange={e => setFormData({...formData, loginTitle: e.target.value})} 
                 />
-                <Input 
-                    label="URL do Logo" 
-                    value={formData.logoUrl} 
-                    onChange={e => setFormData({...formData, logoUrl: e.target.value})} 
-                />
                 
-                {formData.logoUrl && (
-                    <div className="mt-2">
-                        <p className="text-xs text-slate-500 mb-1">Preview:</p>
-                        <img src={formData.logoUrl} className="h-16 rounded border border-slate-600" alt="Preview" />
+                <div>
+                    <label className="block text-sm font-medium text-slate-400 mb-1">Logo da Empresa</label>
+                    <div className="flex items-center gap-4">
+                        {formData.logoUrl && (
+                            <img src={formData.logoUrl} className="w-16 h-16 rounded object-cover border border-slate-600" alt="Logo" />
+                        )}
+                        <input 
+                            type="file" 
+                            accept="image/*"
+                            onChange={handleLogoUpload}
+                            className="text-sm text-slate-400 file:mr-4 file:py-2 file:px-4 file:rounded file:border-0 file:text-sm file:font-semibold file:bg-primary file:text-white hover:file:bg-orange-600"
+                        />
                     </div>
-                )}
+                </div>
             </div>
         </Card>
 
@@ -116,6 +170,42 @@ const Settings = () => {
         <Button onClick={handleSave} isLoading={loading} className="w-40">Salvar Alterações</Button>
         {msg && <span className="text-green-400 text-sm animate-pulse">{msg}</span>}
       </div>
+
+      {/* Coupons Management */}
+      <Card title="Gerenciar Cupons de Desconto">
+          <div className="mb-4 bg-slate-800 p-4 rounded border border-slate-700 flex flex-col md:flex-row gap-4 items-end">
+             <div className="flex-1 w-full">
+                <Input label="Código do Cupom" placeholder="EX: VERAO10" value={newCouponCode} onChange={e => setNewCouponCode(e.target.value)} className="mb-0" />
+             </div>
+             <div className="w-32">
+                <Input label="Desconto (%)" type="number" min="1" max="100" value={newCouponPercent} onChange={e => setNewCouponPercent(Number(e.target.value))} className="mb-0" />
+             </div>
+             <Button onClick={handleAddCoupon} isLoading={loading}>Criar Cupom</Button>
+          </div>
+
+          <Table headers={['Código', 'Desconto', 'Status', 'Ações']}>
+              {coupons.map(c => (
+                  <tr key={c.id} className="hover:bg-slate-700/50">
+                      <td className="px-4 py-3 font-bold text-white">{c.code}</td>
+                      <td className="px-4 py-3 text-green-400">{c.discountPercent}%</td>
+                      <td className="px-4 py-3">
+                          <span className={`px-2 py-1 rounded text-xs ${c.active ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'}`}>
+                              {c.active ? 'ATIVO' : 'INATIVO'}
+                          </span>
+                      </td>
+                      <td className="px-4 py-3 flex gap-2">
+                          <Button variant="ghost" onClick={() => handleToggleCoupon(c)} className="text-slate-400 hover:text-white px-2 py-1">
+                              <i className={`fas fa-${c.active ? 'toggle-on' : 'toggle-off'}`}></i>
+                          </Button>
+                          <Button variant="danger" onClick={() => handleDeleteCoupon(c.id)} className="px-2 py-1 text-xs">
+                              <i className="fas fa-trash"></i>
+                          </Button>
+                      </td>
+                  </tr>
+              ))}
+              {coupons.length === 0 && <tr><td colSpan={4} className="p-4 text-center text-slate-500">Nenhum cupom cadastrado.</td></tr>}
+          </Table>
+      </Card>
     </div>
   );
 };

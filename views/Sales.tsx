@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Card, Button, Table, Modal, Select, Input } from '../components/UIComponents';
 import { useAuth } from '../App';
 import { DataAPI } from '../services/dataService';
-import { Sale, Service } from '../types';
+import { Sale, Service, Coupon } from '../types';
 
 const Sales = () => {
   const { user } = useAuth();
@@ -14,7 +14,9 @@ const Sales = () => {
   // Form State
   const [selectedService, setSelectedService] = useState('');
   const [quantity, setQuantity] = useState(1);
-  const [discount, setDiscount] = useState(0);
+  const [couponCode, setCouponCode] = useState('');
+  const [activeCoupon, setActiveCoupon] = useState<Coupon | null>(null);
+  const [couponMsg, setCouponMsg] = useState('');
 
   const loadData = async () => {
     if(!user) return;
@@ -29,6 +31,26 @@ const Sales = () => {
     loadData();
   }, [user]);
 
+  const validateCoupon = async () => {
+    if(!couponCode) return;
+    setLoading(true);
+    try {
+        const coupon = await DataAPI.getCouponByCode(couponCode);
+        if (coupon) {
+            setActiveCoupon(coupon);
+            setCouponMsg(`Cupom aplicado: ${coupon.discountPercent}% OFF`);
+        } else {
+            setActiveCoupon(null);
+            setCouponMsg('Cupom inválido ou expirado.');
+        }
+    } catch (e) {
+        console.error(e);
+        setCouponMsg('Erro ao validar cupom.');
+    } finally {
+        setLoading(false);
+    }
+  }
+
   const handleCreateSale = async () => {
     if (!selectedService || !user) return;
     setLoading(true);
@@ -36,14 +58,16 @@ const Sales = () => {
         await DataAPI.addSale({
             serviceId: selectedService,
             quantity: Number(quantity),
-            discount: Number(discount),
+            discount: activeCoupon ? activeCoupon.discountPercent : 0,
             userId: user.id
         }, user);
         setIsModalOpen(false);
         // Reset form
         setSelectedService('');
         setQuantity(1);
-        setDiscount(0);
+        setCouponCode('');
+        setActiveCoupon(null);
+        setCouponMsg('');
         await loadData();
     } catch (e) {
         alert("Erro ao criar venda");
@@ -51,6 +75,14 @@ const Sales = () => {
         setLoading(false);
     }
   };
+
+  const getEstimatedTotal = () => {
+    const srv = services.find(s => s.id === selectedService);
+    if (!srv) return 0;
+    const baseTotal = srv.price * quantity;
+    const discount = activeCoupon ? activeCoupon.discountPercent : 0;
+    return baseTotal * (1 - discount/100);
+  }
 
   return (
     <div className="space-y-6">
@@ -100,13 +132,23 @@ const Sales = () => {
                     value={quantity}
                     onChange={(e) => setQuantity(parseInt(e.target.value))}
                 />
-                <Input 
-                    label="Desconto (%)" 
-                    type="number" 
-                    min="0" max="100"
-                    value={discount}
-                    onChange={(e) => setDiscount(parseFloat(e.target.value))}
-                />
+                 <div className="flex flex-col">
+                    <label className="block text-sm font-medium text-slate-400 mb-1">Cupom de Desconto</label>
+                    <div className="flex gap-2">
+                        <input 
+                            className="w-full bg-dark border border-slate-600 rounded p-2 text-white focus:outline-none uppercase"
+                            value={couponCode}
+                            onChange={(e) => setCouponCode(e.target.value)}
+                            placeholder="CÓDIGO"
+                        />
+                        <Button variant="secondary" onClick={validateCoupon} type="button">Validar</Button>
+                    </div>
+                    {couponMsg && (
+                        <span className={`text-xs mt-1 ${activeCoupon ? 'text-green-400' : 'text-red-400'}`}>
+                            {couponMsg}
+                        </span>
+                    )}
+                 </div>
             </div>
 
             {selectedService && (
@@ -115,10 +157,16 @@ const Sales = () => {
                         <span className="text-slate-400">Valor Unitário:</span>
                         <span className="text-white">R$ {services.find(s => s.id === selectedService)?.price}</span>
                     </div>
+                    {activeCoupon && (
+                         <div className="flex justify-between items-center text-sm text-green-400">
+                            <span>Desconto ({activeCoupon.discountPercent}%):</span>
+                            <span>- R$ {(services.find(s => s.id === selectedService)!.price * quantity * (activeCoupon.discountPercent/100)).toFixed(2)}</span>
+                         </div>
+                    )}
                     <div className="flex justify-between items-center mt-2 pt-2 border-t border-slate-700">
-                        <span className="text-lg font-bold text-white">Total Estimado:</span>
+                        <span className="text-lg font-bold text-white">Total Final:</span>
                         <span className="text-xl font-bold text-primary">
-                            R$ {((services.find(s => s.id === selectedService)?.price || 0) * quantity * (1 - discount/100)).toLocaleString()}
+                            R$ {getEstimatedTotal().toLocaleString()}
                         </span>
                     </div>
                 </div>
